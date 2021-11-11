@@ -1,0 +1,21 @@
+---
+title: "Analysis"
+author: "Zoltan Aldott"
+date: "11/11/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+
+```{r import}
+
+credits <- read_csv("assignment_data.csv")
+
+# Based on readme.txt data dictionary, only a few columns are actually numeric, so all but these columns are changed to factors
+numericcols <- c("ID","LIMIT","AGE","BILL1","BILL2","BILL3","BILL4","BILL5","BILL6","PYAMT1","PYAMT2","PYAMT3","PYAMT4","PYAMT5","PYAMT6","CREDITCRD")
+
+```

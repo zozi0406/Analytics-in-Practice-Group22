@@ -8,14 +8,61 @@ output: html_document
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
+
 ```
 
 
 ```{r import}
-
 credits <- read_csv("assignment_data.csv")
-
+credits$ID<-NULL
 # Based on readme.txt data dictionary, only a few columns are actually numeric, so all but these columns are changed to factors
-numericcols <- c("ID","LIMIT","AGE","BILL1","BILL2","BILL3","BILL4","BILL5","BILL6","PYAMT1","PYAMT2","PYAMT3","PYAMT4","PYAMT5","PYAMT6","CREDITCRD")
+numericcols <- c("LIMIT","AGE","BILL1","BILL2","BILL3","BILL4","BILL5","BILL6","PYAMT1","PYAMT2","PYAMT3","PYAMT4","PYAMT5","PYAMT6","CREDITCRD","PY1","PY2","PY3","PY4","PY5","PY6")
+non_numericcols<-names(credits) %>% setdiff(numericcols)
+
+credits[,non_numericcols] <- lapply(credits[,non_numericcols],factor)
+
+#Ordered
+credits$AGE_CTG<-credits$AGE_CTG %>% ordered(levels=c(1,2,3,4))
+credits$SATISFACTION<-credits$SATISFACTION %>% ordered(levels=c(0,1,2))
+credits$FREQTRANSACTION<-credits$FREQTRANSACTION %>% ordered(levels=c(0,1))
+credits$YEARSINADD<-credits$YEARSINADD %>% ordered(levels=c(3,4,5,6,7))
+
+#Transform historical payments
+for (i in 1:6){
+  credits[[paste0("paidfull",i)]]<-ifelse(credits[[paste0("PY",i)]]==-1,1,0)
+  credits[[paste0("notransaction",i)]]<-ifelse(credits[[paste0("PY",i)]]==-2,1,0)
+  credits[[paste0("PY",i)]]<-ifelse(credits[[paste0("PY",i)]]<0,0,credits[[paste0("PY",i)]])
+  #names(credits)[names(credits)==paste0("PY",i)]<-paste0("DELAY",i)
+}
+
+complete <- complete.cases(credits)
+credits[!complete,]
+names(credits)<-names(credits) %>% tolower()
+#What to do with NAs?
+
+credits<-credits[complete,]
+
+# No variation in cm_hist
+credits$cm_hist<-NULL
+
+```
+
+
+```{r missing_data}
+
+```
+
+
+```{r sampling}
+
+```
+
+
+```{r sample_splitting}
+
+```
+
+
+```{r baseline_modeling}
 
 ```

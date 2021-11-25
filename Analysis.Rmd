@@ -7,7 +7,13 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(plyr)
 library(tidyverse)
+library(caTools)
+library(caret)
+library(gbm)
+library(mlbench)
+library(smotefamily)
 
 ```
 
@@ -15,91 +21,138 @@ library(tidyverse)
 ```{r import}
 credits <- read_csv("assignment_data.csv")
 credits$ID<-NULL
+
 # Based on readme.txt data dictionary, only a few columns are actually numeric, so all but these columns are changed to factors
-numericcols <- c("LIMIT","AGE","BILL1","BILL2","BILL3","BILL4","BILL5","BILL6","PYAMT1","PYAMT2","PYAMT3","PYAMT4","PYAMT5","PYAMT6","CREDITCRD","PY1","PY2","PY3","PY4","PY5","PY6")
+numericcols <- c("LIMIT","AGE","BILL1","BILL2","BILL3","BILL4","BILL5","BILL6","PYAMT1","PYAMT2","PYAMT3","PYAMT4","PYAMT5","PYAMT6","CREDITCRD","PY1","PY2","PY3","PY4","PY5","PY6","YEARSINADD")
 non_numericcols<-names(credits) %>% setdiff(numericcols)
 
 credits[,non_numericcols] <- lapply(credits[,non_numericcols],factor)
 
 #Ordered
-credits$AGE_CTG<-credits$AGE_CTG %>% ordered(levels=c(1,2,3,4))
 credits$SATISFACTION<-credits$SATISFACTION %>% ordered(levels=c(0,1,2))
 credits$FREQTRANSACTION<-credits$FREQTRANSACTION %>% ordered(levels=c(0,1))
-credits$YEARSINADD<-credits$YEARSINADD %>% ordered(levels=c(3,4,5,6,7))
 
-#Transform historical payments
+#Other ordered factors like YEARSINADD and PY# are treated as numeric to reduce model sizes
 
+#Revalue class to interpret easier
+credits$CLASS <- credits$CLASS %>% revalue(c("0"="NO_DEFAULT","1"="DEFAULT"))
+credits$CLASS <- factor(credits$CLASS, levels=rev(levels(credits$CLASS)))
+
+
+#Drop NAs
 complete <- complete.cases(credits)
-#What to do with NAs?
-
 credits<-credits[complete,]
 
 # No variation in cm_hist
 credits$CM_HIST<-NULL
+
+#Age is retained instead of age category
 credits$AGE_CTG<-NULL
+
+#Remove duplicates
+credits <- credits %>% distinct()
 
 
 ```
 
 
 ```{r baseline_datasets}
-baseline_datasets<-list()
+data_defs<-list()
+
+data_defs$sparse<-credits %>% select(-CLASS)
 
 labels<-credits$CLASS
 
-baseline_datasets$sparse_abs<-credits
-
 for (i in 1:6){
-  baseline_datasets$sparse_abs[[paste0("PY",i)]]<-ifelse(baseline_datasets$sparse_abs[[paste0("PY",i)]]<0,0,credits[[paste0("PY",i)]])
-  names(baseline_datasets$sparse_abs)[names(baseline_datasets$sparse_abs)==paste0("PY",i)]<-paste0("DELAY",i)
+  data_defs$sparse[[paste0("PY",i)]]<-ifelse(data_defs$sparse[[paste0("PY",i)]]<0,0,data_defs$sparse[[paste0("PY",i)]])
 }
 
-baseline_datasets$sparse_scaled<-credits
+data_defs$rich<-credits %>% select(-CLASS)
 
 for (i in 1:6){
-  baseline_datasets$sparse_scaled[[paste0("PY",i)]]<-ifelse(baseline_datasets$sparse_scaled[[paste0("PY",i)]]<0,0,credits[[paste0("PY",i)]])
-  names(baseline_datasets$sparse_scaled)[names(baseline_datasets$sparse_scaled)==paste0("PY",i)]<-paste0("DELAY",i)
-  baseline_datasets$sparse_scaled[[paste0("BILL",i)]]<-scale(baseline_datasets$sparse_scaled[[paste0("BILL",i)]])
-  baseline_datasets$sparse_scaled[[paste0("PYAMT",i)]]<-scale(baseline_datasets$sparse_scaled[[paste0("PYAMT",i)]])
+  data_defs$rich[[paste0("paidfull",i)]]<-ifelse(data_defs$rich[[paste0("PY",i)]]==-1,1,0)
+  data_defs$rich[[paste0("notransaction",i)]]<-ifelse(data_defs$rich[[paste0("PY",i)]]==-2,1,0)
+  data_defs$rich[[paste0("PY",i)]]<-ifelse(data_defs$rich[[paste0("PY",i)]]<0,0,data_defs$rich[[paste0("PY",i)]])
 }
 
+#Scale numeric columns
+data_defs$sparse[,numericcols]<-lapply(data_defs$sparse[,numericcols],scale) %>% lapply(`[`,c(1:nrow(data_defs$sparse)))
+data_defs$rich[,numericcols]<-lapply(data_defs$rich[,numericcols],scale) %>% lapply(`[`,c(1:nrow(data_defs$rich)))
 
-baseline_datasets$rich_abs<-credits
-
-for (i in 1:6){
-  baseline_datasets$rich_abs[[paste0("paidfull",i)]]<-ifelse(baseline_datasets$rich_abs[[paste0("PY",i)]]==-1,1,0)
-  baseline_datasets$rich_abs[[paste0("notransaction",i)]]<-ifelse(baseline_datasets$rich_abs[[paste0("PY",i)]]==-2,1,0)
-  baseline_datasets$rich_abs[[paste0("PY",i)]]<-ifelse(baseline_datasets$rich_abs[[paste0("PY",i)]]<0,0,credits[[paste0("PY",i)]])
-  names(baseline_datasets$rich_abs)[names(baseline_datasets$rich_abs)==paste0("PY",i)]<-paste0("DELAY",i)
-}
-
-baseline_datasets$rich_scaled<-credits
-
-for (i in 1:6){
-  baseline_datasets$rich_scaled[[paste0("paidfull",i)]]<-ifelse(baseline_datasets$rich_scaled[[paste0("PY",i)]]==-1,1,0)
-  baseline_datasets$rich_scaled[[paste0("notransaction",i)]]<-ifelse(baseline_datasets$rich_scaled[[paste0("PY",i)]]==-2,1,0)
-  baseline_datasets$rich_scaled[[paste0("PY",i)]]<-ifelse(baseline_datasets$rich_scaled[[paste0("PY",i)]]<0,0,credits[[paste0("PY",i)]])
-  names(baseline_datasets$sparse_scaled)[names(baseline_datasets$sparse_scaled)==paste0("PY",i)]<-paste0("DELAY",i)
-  baseline_datasets$rich_scaled[[paste0("BILL",i)]]<-scale(baseline_datasets$rich_scaled[[paste0("BILL",i)]])
-  baseline_datasets$rich_scaled[[paste0("PYAMT",i)]]<-scale(baseline_datasets$rich_scaled[[paste0("PYAMT",i)]])
-}
-
-#Drop duplicates
-
-
+#Apply Contrast encoding to non-numeric variables
+data_defs$sparse<-model.matrix(~.+1,data_defs$sparse)[,-1] %>% as_tibble
+data_defs$rich<-model.matrix(~.+1,data_defs$rich)[,-1] %>% as_tibble
 ```
 
 
-```{r sampling}
-
-```
 
 
-```{r sample_splitting}
 
+```{r sample_splitting_and_sampling}
+set.seed(100)
+
+training<-sample.split(credits$CLASS,SplitRatio = 0.8)
+test<-!training
+training_labels<-labels[training]
+test_labels<-labels[!training]
+
+train_sets<-list()
+train_sets$sparse<-data_defs$sparse[training,]
+train_sets$rich<-data_defs$rich[training,]
+
+#200% smote
+train_sets$sparse_smote<-SMOTE(train_sets$sparse,training_labels,dup_size=2)[1]$data
+train_sets$rich_smote<-SMOTE(train_sets$rich,training_labels,dup_size=2)[1]$data
+
+#Add class column
+train_sets$sparse<-train_sets$sparse %>% add_column(class=training_labels)
+train_sets$rich<-train_sets$rich %>% add_column(class=training_labels)
+
+test_sparse<-data_defs$sparse[!training,] %>% add_column(class=test_labels)
+test_rich<-data_defs$rich[!training,] %>% add_column(class=test_labels)
 ```
 
 
 ```{r baseline_modeling}
+set.seed(100)
+
+tc<-trainControl(method = "cv" ,number = 5 ,allowParallel = T,classProbs = TRUE,summaryFunction = twoClassSummary)
+
+evaluate_model <- function(formula=class~.,data,method,train_control=tc,tuneLength=1, grid=NULL, ...) {
+  
+  fit<-train(form=formula,data=data,method=method,trControl=train_control,metric="ROC",maximize=T,tuneGrid=grid,tuneLength=tuneLength,...)
+  
+  cm<-confusionMatrix.train(fit)
+  
+  return(list(fit=fit,cm=cm))
+}
+
+
+testeval <- function(data,fit){
+  preds<-predict(fit,data)
+  cm<-confusionMatrix(preds,data$class)
+  return(cm)
+}
+
+
+### EXAMPLE USAGE
+
+### train_sets includes the 4 candidate datasets for modeling, sparse and rich & oversampled versions. The above function automatically runs cross-validation to check sensitivity to sample selection. At the end during test evaluation, use test_sparse or test_rich for both the normal and the oversampled models
+
+
+## Change data and method, once you have chosen a final model, you can do automated Hyperparameter tuning by increasing tuneLength. And possibly (but not necessarily) define a grid. You can define a grid to choose default parameters too.
+
+tunegrid <- expand.grid(n.trees=100,interaction.depth=1,shrinkage=0.01,n.minobsinnode=10)
+test<-evaluate_model(data=train_sets$rich_smote, method="gbm",verbose=T,tuneLength=1,grid=tunegrid)
+
+test$fit
+test$cm
+
+### TEST EVALUATION FOR THE FINAL STEP
+(tst<-testeval(test_rich,test$fit))
+
+# Have fun!!! :D
+
+
 
 ```

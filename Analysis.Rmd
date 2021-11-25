@@ -28,27 +28,64 @@ credits$FREQTRANSACTION<-credits$FREQTRANSACTION %>% ordered(levels=c(0,1))
 credits$YEARSINADD<-credits$YEARSINADD %>% ordered(levels=c(3,4,5,6,7))
 
 #Transform historical payments
-for (i in 1:6){
-  credits[[paste0("paidfull",i)]]<-ifelse(credits[[paste0("PY",i)]]==-1,1,0)
-  credits[[paste0("notransaction",i)]]<-ifelse(credits[[paste0("PY",i)]]==-2,1,0)
-  credits[[paste0("PY",i)]]<-ifelse(credits[[paste0("PY",i)]]<0,0,credits[[paste0("PY",i)]])
-  #names(credits)[names(credits)==paste0("PY",i)]<-paste0("DELAY",i)
-}
 
 complete <- complete.cases(credits)
-credits[!complete,]
-names(credits)<-names(credits) %>% tolower()
 #What to do with NAs?
 
 credits<-credits[complete,]
 
 # No variation in cm_hist
-credits$cm_hist<-NULL
+credits$CM_HIST<-NULL
+credits$AGE_CTG<-NULL
+
 
 ```
 
 
-```{r missing_data}
+```{r baseline_datasets}
+baseline_datasets<-list()
+
+labels<-credits$CLASS
+
+baseline_datasets$sparse_abs<-credits
+
+for (i in 1:6){
+  baseline_datasets$sparse_abs[[paste0("PY",i)]]<-ifelse(baseline_datasets$sparse_abs[[paste0("PY",i)]]<0,0,credits[[paste0("PY",i)]])
+  names(baseline_datasets$sparse_abs)[names(baseline_datasets$sparse_abs)==paste0("PY",i)]<-paste0("DELAY",i)
+}
+
+baseline_datasets$sparse_scaled<-credits
+
+for (i in 1:6){
+  baseline_datasets$sparse_scaled[[paste0("PY",i)]]<-ifelse(baseline_datasets$sparse_scaled[[paste0("PY",i)]]<0,0,credits[[paste0("PY",i)]])
+  names(baseline_datasets$sparse_scaled)[names(baseline_datasets$sparse_scaled)==paste0("PY",i)]<-paste0("DELAY",i)
+  baseline_datasets$sparse_scaled[[paste0("BILL",i)]]<-scale(baseline_datasets$sparse_scaled[[paste0("BILL",i)]])
+  baseline_datasets$sparse_scaled[[paste0("PYAMT",i)]]<-scale(baseline_datasets$sparse_scaled[[paste0("PYAMT",i)]])
+}
+
+
+baseline_datasets$rich_abs<-credits
+
+for (i in 1:6){
+  baseline_datasets$rich_abs[[paste0("paidfull",i)]]<-ifelse(baseline_datasets$rich_abs[[paste0("PY",i)]]==-1,1,0)
+  baseline_datasets$rich_abs[[paste0("notransaction",i)]]<-ifelse(baseline_datasets$rich_abs[[paste0("PY",i)]]==-2,1,0)
+  baseline_datasets$rich_abs[[paste0("PY",i)]]<-ifelse(baseline_datasets$rich_abs[[paste0("PY",i)]]<0,0,credits[[paste0("PY",i)]])
+  names(baseline_datasets$rich_abs)[names(baseline_datasets$rich_abs)==paste0("PY",i)]<-paste0("DELAY",i)
+}
+
+baseline_datasets$rich_scaled<-credits
+
+
+for (i in 1:6){
+  baseline_datasets$rich_scaled[[paste0("paidfull",i)]]<-ifelse(baseline_datasets$rich_scaled[[paste0("PY",i)]]==-1,1,0)
+  baseline_datasets$rich_scaled[[paste0("notransaction",i)]]<-ifelse(baseline_datasets$rich_scaled[[paste0("PY",i)]]==-2,1,0)
+  baseline_datasets$rich_scaled[[paste0("PY",i)]]<-ifelse(baseline_datasets$rich_scaled[[paste0("PY",i)]]<0,0,credits[[paste0("PY",i)]])
+  names(baseline_datasets$sparse_scaled)[names(baseline_datasets$sparse_scaled)==paste0("PY",i)]<-paste0("DELAY",i)
+  baseline_datasets$rich_scaled[[paste0("BILL",i)]]<-scale(baseline_datasets$rich_scaled[[paste0("BILL",i)]])
+  baseline_datasets$rich_scaled[[paste0("PYAMT",i)]]<-scale(baseline_datasets$rich_scaled[[paste0("PYAMT",i)]])
+}
+
+
 
 ```
 

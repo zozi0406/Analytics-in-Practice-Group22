@@ -142,6 +142,8 @@ testeval <- function(data,fit){
 
 ## Change data and method, once you have chosen a final model, you can do automated Hyperparameter tuning by increasing tuneLength. And possibly (but not necessarily) define a grid. You can define a grid to choose default parameters too.
 
+## You can also just let it choose it's own grid by not specifying a grid at all. (Pass a NULL)
+
 tunegrid <- expand.grid(n.trees=100,interaction.depth=1,shrinkage=0.01,n.minobsinnode=10)
 test<-evaluate_model(data=train_sets$rich_smote, method="gbm",verbose=T,tuneLength=1,grid=tunegrid)
 

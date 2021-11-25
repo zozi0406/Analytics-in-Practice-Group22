@@ -75,7 +75,6 @@ for (i in 1:6){
 
 baseline_datasets$rich_scaled<-credits
 
-
 for (i in 1:6){
   baseline_datasets$rich_scaled[[paste0("paidfull",i)]]<-ifelse(baseline_datasets$rich_scaled[[paste0("PY",i)]]==-1,1,0)
   baseline_datasets$rich_scaled[[paste0("notransaction",i)]]<-ifelse(baseline_datasets$rich_scaled[[paste0("PY",i)]]==-2,1,0)
@@ -85,6 +84,7 @@ for (i in 1:6){
   baseline_datasets$rich_scaled[[paste0("PYAMT",i)]]<-scale(baseline_datasets$rich_scaled[[paste0("PYAMT",i)]])
 }
 
+#Drop duplicates
 
 
 ```

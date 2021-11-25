@@ -15,23 +15,43 @@
   6) AGE: age in years
   7) AGE_CTG: age category (1= from 20 to 34; 2 = from 35 to 49; 3 = from 50 to 64; 4 = 65 and over)
   8 - 13) Variables PY1, PY2, PY3, PY4, PY5, PY6 : History of past payments. 
-		 PY1 = the repayment status in period X; PY2 = the repayment status in period (X-1)
-		 PY3 = the repayment status in period (X-2); PY4 = the repayment status in period (X-3)
-		 PY5 = the repayment status in period (X-4); PY6 = the repayment status in period (X-5)
+		 PY1 = the repayment status in period X; 
+		 PY2 = the repayment status in period (X-1);
+		 PY3 = the repayment status in period (X-2); 
+		 PY4 = the repayment status in period (X-3);
+		 PY5 = the repayment status in period (X-4); 
+		 PY6 = the repayment status in period (X-5);
 	
 	Categories in these variables are:
-	-2: No consumption/transaction;  -1: Paid in full;  0: small payment;  
-	1 = payment delay for one period; 2 = payment delay for two periods; ...; 8 = payment delay for eight periods; 9 = payment delays for nine periods and above
+	
+	-2: No consumption/transaction;  # notransaction(i)
+	-1: Paid in full; # paidfull(i)
+	
+	0: small payment;  # PY(i)
+	1 = payment delay for one period; 
+	2 = payment delay for two periods; ...; 
+	8 = payment delay for eight periods; 
+	9 = payment delays for nine periods and above
 
-  14 - 19) Variables = BILL1, BILL2, BILL3, BILL4, BILL5, BILL6: Amount of bill statement in dollars
-		   BILL1: bill statement in period X; BILL2: bill statement in period (X-1)
-		   BILL3: bill statement in period (X-2); BILL4: bill statement in period (X-3)
-		   BILL5: bill statement in period (X-4); BILL6: bill statement in period (X-5)
+  14 - 19) 
+  Variables = BILL1, BILL2, BILL3, BILL4, BILL5, BILL6: 
+  Amount of bill statement in dollars
+  BILL1: bill statement in period X; 
+  BILL2: bill statement in period (X-1)
+  BILL3: bill statement in period (X-2); 
+  BILL4: bill statement in period (X-3)
+  BILL5: bill statement in period (X-4); 
+  BILL6: bill statement in period (X-5)
 
-  20 - 25) Variables: PYAMT1, PYAMT2, PYAMT3, PYAMT4, PYAMT5, PYAMT6: Amount of previous payment in dollars
-		  PYAMT1: amount paid in period X; PYAMT2: amount paid in period (X-1)
-		  PYAMT3: amount paid in period (X-2); PYAMT4: amount paid in period (X-3)
-		  PYAMT5: amount paid in period (X-4); PYAMT6: amount paid in period (X-5)
+  20 - 25) 
+  Variables: PYAMT1, PYAMT2, PYAMT3, PYAMT4, PYAMT5, PYAMT6:
+  Amount of previous payment in dollars
+  PYAMT1: amount paid in period X; 
+  PYAMT2: amount paid in period (X-1)
+  PYAMT3: amount paid in period (X-2);
+  PYAMT4: amount paid in period (X-3)
+  PYAMT5: amount paid in period (X-4); 
+  PYAMT6: amount paid in period (X-5)
 
   26) SATISFACTION: service satisfaction (0 = not satisfactory; 1= normal; 2 = satisfactory)
   27) FREQTRANSACTION: how frequently client visits Universal Plus (0 = rarely, 1 = regularly)

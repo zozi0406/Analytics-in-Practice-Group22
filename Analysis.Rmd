@@ -14,7 +14,7 @@ library(tidyverse)
 
 ```{r import}
 credits <- read_csv("assignment_data.csv")
-credits$ID<-NULL
+credits$ID<-NULL # delete column 'ID'
 # Based on readme.txt data dictionary, only a few columns are actually numeric, so all but these columns are changed to factors
 numericcols <- c("LIMIT","AGE","BILL1","BILL2","BILL3","BILL4","BILL5","BILL6","PYAMT1","PYAMT2","PYAMT3","PYAMT4","PYAMT5","PYAMT6","CREDITCRD","PY1","PY2","PY3","PY4","PY5","PY6")
 non_numericcols<-names(credits) %>% setdiff(numericcols)
@@ -45,6 +45,8 @@ credits<-credits[complete,]
 # No variation in cm_hist
 credits$cm_hist<-NULL
 
+# problems : duplication exists & unbalanced data set
+table(credits$class)
 ```
 
 
@@ -59,10 +61,160 @@ credits$cm_hist<-NULL
 
 
 ```{r sample_splitting}
+#install.packages("caTools")
+library(caret)
+library(pROC)
+library(caTools)
+
+#Set random seed
+set.seed(11)
+
+# partition the data into training and test sets
+split <- sample.split(credits$class, SplitRatio = 0.80)
+
+# Generate the training and test sets by subsetting the data records from actual dataset
+trainset = subset(credits, split == TRUE) 
+testset = subset(credits, split == FALSE) 
+
+#create folds
+
+
+folds <- createFolds(y=trainset$class, k=5)
+
+# ceate training data and validation data set.
+fold_test <- trainset[folds[[1]],]
+fold_valid <- trainset[-folds[[1]],]
+
+#Build Model
+
+#val=CVlm(df=cv,m=10,form.lm=formula(Y~X1+X2+X3+X4))
+#fold_predict <- predict(fold_pre,type='response',newdata=fold_test)
+
+#Provide probabilities and generate input data
+#ROC <- roc(fold_test[,], fold_predict)
+```
+
+```{r baseline_modeling_try1}
+#install.packages("doSNOW")
+#install.packages("doParallel") 
+#install.packages("doMPI")
+#install.packages('gbm')
+library(doSNOW)
+library(doParallel)
+library(doMPI)
+library(gbm)
+data_var <- subset(trainset, select = -class)
+label_var <- trainset$class
+
+tuneGrid <- expand.grid(
+        n_trees = 5000, 
+        shrink = c(.0001),
+        i.depth = seq(10,25,5),
+        minobs = 100,
+        distro = c(0,1) #0 = bernoulli, 1 = adaboost
+        )
+err.vect <- 
+  foreach (j=1:nrow(tuneGrid)) %dopar% {
+        fit <- gbm(class~., data=trainset,
+            n.trees = tuneGrid[j, 'n_trees'], 
+            shrinkage = tuneGrid[j, 'shrink'],
+            interaction.depth=tuneGrid[j, 'i.depth'], 
+            n.minobsinnode = tuneGrid[j, 'minobs'], 
+            distribution=ifelse(tuneGrid[j, 'distro']==0, "bernoulli", "adaboost"),
+            w=weights$Weight,
+            bag.fraction=0.5,
+            cv.folds=5)
+        cv.test <- data.frame(
+          scores=1/(1 + exp(-fit$cv.fitted)),
+          Label=trainset$class)
+        print(j) #write out to the listener
+        cbind(gbm.roc.area(cv.test$class, cv.test$scores),
+              getAMS(cv.test), 
+              tuneGrid[j, 'n_trees'],
+              tuneGrid[j, 'shrink'], 
+              tuneGrid[j, 'i.depth'],
+              tuneGrid[j, 'minobs'], 
+              tuneGrid[j, 'distro'], j)
+}
 
 ```
 
+```{r baseline_modeling_try2}
+library(lightgbm)
 
-```{r baseline_modeling}
+set.seed(0)
+
+# training set
+data_var <- subset(trainset, select = -class)
+label_var <- trainset$class
+
+grid_search <- expand.grid(weight = seq(1, 30, 2))
+lgb_rate <- numeric(length = nrow(grid_search))
+for(i in 1:nrow(grid_search)){
+    lgb_train <- lgb.Dataset(
+        data = data.matrix(data_var), 
+        label = label_var, 
+        free_raw_data = FALSE
+    )
+    params <- list(objective = "binary",
+               metric="binary_logloss,auc", 
+               learning_rate = 0.1, 
+               num_leaves = 63, 
+               tree_learner = "serial", 
+               feature_fraction = 0.8, 
+               bagging_freq = 5, 
+               bagging_fraction = 0.8, 
+               min_data_in_leaf = 50,
+               min_sum_hessian_in_leaf = 5.0)
+    lgb_mod <- lgb.cv(
+        params,
+        data = lgb_train,
+        nrounds = 50,
+        stratified = TRUE,
+        nfold = 5,
+        learning_rate = .1
+    )
+    lgb_rate[i] <-
+      unlist(lgb_mod$record_evals$valid$auc$eval)[length(unlist(lgb_mod$record_evals$valid$auc$eval))]
+}
+
+
+lgb_test <- lgb.Dataset(
+        data = data.matrix(subset(testset, 
+                                  select = -class)), 
+        label = testset$class, 
+        free_raw_data = FALSE
+    )
+
+#Parameters
+
+num_iterations <- 100
+config <- list(objective = "binary",
+               metric="binary_logloss,auc", 
+               learning_rate = 0.1, 
+               num_leaves = 63, 
+               tree_learner = "serial", 
+               feature_fraction = 0.8, 
+               bagging_freq = 5, 
+               bagging_fraction = 0.8, 
+               min_data_in_leaf = 50,
+               min_sum_hessian_in_leaf = 5.0)
+
+#Create data handle and booster
+handle.data <- lgbm.data.create(x)
+
+lgbm.data.setField(handle.data, "label", y)
+
+handle.booster <- lgbm.booster.create(handle.data, lapply(config, as.character))
+
+#Train for num_iterations iterations and eval every 5 steps
+
+lgbm.booster.train(handle.booster, num_iterations, 5)
+
+#Predict
+pred <- lgbm.booster.predict(handle.booster, x.test)
+
+#Test accuracy
+sum(y.test == (y.pred > 0.5)) / length(y.test)
 
 ```

@@ -161,6 +161,7 @@ test$cm
 
 
 ```{r baseline_modeling_try}
+
 set.seed(100)
 
 tc<-trainControl(method = "cv" ,number = 5 ,allowParallel = T,classProbs = TRUE,summaryFunction = twoClassSummary)

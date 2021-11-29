@@ -158,3 +158,87 @@ test$cm
 
 
 ```
+
+
+```{r baseline_modeling_try}
+set.seed(100)
+
+tc<-trainControl(method = "cv" ,number = 5 ,allowParallel = T,classProbs = TRUE,summaryFunction = twoClassSummary)
+
+evaluate_model <-
+function(formula=class~.,data,method,train_control=tc,tuneLength=1, grid=NULL, ...) {
+  
+  # Train the model
+  fit <- train(form=formula,
+             data=data,
+             method=method,
+             trControl=train_control,
+             metric="ROC",
+             maximize=T,
+             tuneGrid=grid,
+             tuneLength=tuneLength,
+             verbose = FALSE)
+  
+  cm <- confusionMatrix.train(fit)
+  
+  return(list(fit=fit,cm=cm))
+}
+
+testeval <- function(data,fit){
+  preds <- predict(fit,data)
+  cm <- confusionMatrix(preds,
+                        data$class,
+                        mode = "prec_recall")
+  return(cm)
+}
+
+
+tunegrid <- expand.grid(n.trees=100,
+                        interaction.depth = c(1, 5, 9),
+                        shrinkage=0.1,
+                        n.minobsinnode=10)
+
+# rich_smote
+test_rich_smote <- evaluate_model(data=train_sets$rich_smote, method="gbm",verbose=T,tuneLength=1,grid=tunegrid)
+
+test_rich_smote$fit
+test_rich_smote$cm
+
+### TEST EVALUATION FOR THE FINAL STEP
+(tst<-testeval(test_rich,test_rich_smote$fit))
+
+
+```
+
+```{r}
+# sparse_smote
+test<-evaluate_model(data=train_sets$sparse_smote, method="gbm",verbose=T,tuneLength=1,grid=tunegrid)
+
+test$fit
+test$cm
+
+### TEST EVALUATION FOR THE FINAL STEP
+(tst<-testeval(test_sparse,test$fit))
+```
+
+```{r}
+# sparse
+test<-evaluate_model(data=train_sets$sparse, method="gbm",verbose=T,tuneLength=1,grid=tunegrid)
+
+test$fit
+test$cm
+
+### TEST EVALUATION FOR THE FINAL STEP
+(tst<-testeval(test_sparse,test$fit))
+```
+
+```{r}
+# rich_smote
+test<-evaluate_model(data=train_sets$rich, method="gbm",verbose=T,tuneLength=1,grid=tunegrid)
+
+test$fit
+test$cm
+
+### TEST EVALUATION FOR THE FINAL STEP
+(tst<-testeval(test_rich,test$fit))
+```

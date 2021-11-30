@@ -18,6 +18,9 @@ library(themis)
 library(MLmetrics)
 library(pROC)
 library(MLeval)
+library(rpart)
+
+library(glmnet)
 ```
 
 
@@ -145,10 +148,10 @@ test_rich<-data_defs$rich[!training,] %>% add_column(class=test_labels)
 ```{r baseline_modeling, warning=FALSE}
 #Modelling is done via caret's train() framework.
 #Define settings for cross-validation and model evaluation
-tc_normal<-trainControl(method = "cv" ,number = 5 ,allowParallel = T,classProbs = TRUE,summaryFunction = prSummary, savePredictions = TRUE)
-tc_smote<-trainControl(method = "cv" ,number = 5 ,allowParallel = T,classProbs = TRUE,summaryFunction = prSummary,sampling="smote", savePredictions = TRUE)
-tc_over<-trainControl(method = "cv" ,number = 5 ,allowParallel = T,classProbs = TRUE,summaryFunction = prSummary,sampling="up", savePredictions = TRUE)
-tc_under<-trainControl(method = "cv" ,number = 5 ,allowParallel = T,classProbs = TRUE,summaryFunction = prSummary,sampling="down", savePredictions = TRUE)
+tc_normal<-trainControl(method = "cv" ,number = 5 , classProbs = TRUE,summaryFunction = prSummary, savePredictions = TRUE)
+tc_smote<-trainControl(method = "cv" ,number = 5 , classProbs = TRUE,summaryFunction = prSummary,sampling="smote", savePredictions = TRUE)
+tc_over<-trainControl(method = "cv" ,number = 5 , classProbs = TRUE,summaryFunction = prSummary,sampling="up", savePredictions = TRUE)
+tc_under<-trainControl(method = "cv" ,number = 5, classProbs = TRUE,summaryFunction = prSummary,sampling="down", savePredictions = TRUE)
 
 #Define function for cross-validated model evaluation
 evaluate_model <- function(formula=class~.,data,method,train_control=tc_normal,tuneLength=1, grid=NULL, ...) {
@@ -161,7 +164,7 @@ evaluate_model <- function(formula=class~.,data,method,train_control=tc_normal,t
 #Define function for evaluation on test data.
 testeval <- function(data,fit){
   preds<-predict(fit,data)
-  cm<-confusionMatrix(preds,data$class)
+  cm<-confusionMatrix(preds,data$class,mode="prec_recall")
   return(cm)
 }
 
@@ -183,7 +186,7 @@ baseline$rich_under<-evaluate_model(data=train_sets$rich, method="glm",train_con
 
 baseline_res <- data.frame()
 for (i in names(baseline)) {
-    baseline_res<-baseline[[i]]$results %>% add_column(dataset=i) %>%  bind_rows(baseline_res)
+    baseline_res<-baseline[[i]]$results[1,] %>% add_column(dataset=i) %>%  bind_rows(baseline_res)
 }
 
 #Note, the AUC included here refers to the area under the PRG (Precision-Recall gain) curve.
@@ -203,40 +206,69 @@ train_control<-tc_over
 
 model_comparison<-list()
 
+#The key common features of the algorithms compared below include scalability and speed.
+#Although other classification algorithms may also do well, their computational costs tend to scale significantly with observations and variables.
+#As heuristics do not allow to drop any variables in this case, only such methods are explored that scale efficiently and are not prone to overfit
+#when including a high number of features.
+
+
+#Logistic regression has no hyperparameters
 model_comparison$glm<-evaluate_model(data=training_set, method="glm",train_control = train_control)
+#Regularized (L1 and L2) logistic regression
 model_comparison$glmnet<-evaluate_model(data=training_set, method="glmnet",train_control = train_control)
-model_comparison$gbm<-evaluate_model(data=training_set, method="gbm",train_control = train_control)
-model_comparison$rf<-evaluate_model(data=training_set, method="rf",train_control = train_control)
-model_comparison$svm_lin<-evaluate_model(data=training_set, method="svmLinear",train_control = train_control)
-model_comparison$svm<-evaluate_model(data=training_set, method="svmRadial",train_control = train_control)
+#Gradient-boosting machine
+model_comparison$gbm<-evaluate_model(data=training_set, method="gbm",train_control = train_control,verbose=F)
+#XGBoost
 model_comparison$xgb<-evaluate_model(data=training_set, method="xgbTree",train_control = train_control)
-model_comparison$tree<-evaluate_model(data=training_set, method="C5.0",train_control = train_control)
-model_comparison$nnet<-evaluate_model(data=training_set, method="nnet",train_control = train_control)
+#Decision tree
+model_comparison$rpart<-evaluate_model(data=training_set, method="rpart",train_control = train_control)
 
 model_res <- data.frame()
 for (i in names(model_comparison)) {
-    model_res<-model_comparison[[i]]$results %>% add_column(dataset=i) %>%  bind_rows(model_res)
+    model_res<-model_comparison[[i]]$results[1,] %>% add_column(dataset=i) %>% select(dataset,F,Recall,Precision) %>% bind_rows(model_res)
 }
 
 #Note, the AUC included here refers to the area under the PRG (Precision-Recall gain) curve.
 #The main metric used here is the F score which attempts to balance Precision and Recall.
 
+#XGBoost, a variation of the gradient boosting algorithm seems to be performing the best with default hyperparameters. This will be tuned further to determine the final model.
 model_res %>% arrange(desc(F))
 
 
+#The recent update to XGboost introduced a deprecation warning, which is silenced below. The rest of the functionality remains as intended.
+#The below command creates a grid of n^5 models and chooses the one with the optimal Cross-validated F1_score.
+
+#The following grid search is a reduced version of a longer tuning process to indicate the methodology.
+if (!file.exists("xgb_tuning.rds")){
+  capture.output(xgb_tuning<-evaluate_model(data=training_set,method="xgbTree",train_control=train_control,grid=expand.grid(
+    "eta"=c(0.1,0.05),
+    "min_child_weight"=c(2,3),
+    "max_depth"=c(2,3),
+    "nrounds"=c(50,100),
+    "gamma"=c(0.1,0.2),
+    "subsample"=c(0.9,1),
+    "colsample_bytree"=c(0.75,0.85))),file=nullfile())
+  saveRDS(xgb_tuning,"xgb_tuning.rds")
+} else {
+  xgb_tuning <- readRDS("xgb_tuning.rds")
+}
 
 
+#Due to the nature of gradient boosting models and xgboost's parallel processing, the exact result varies slightly from the one achieved above, despite setting a random seed before training. Nonetheless, the result is not significantly different.
 
+#The xgb_tuning tuning object automatically selects the final model as the one with the highest F1_score, which can be used to evaluate the model performance on the test set.
+testeval(test_set,xgb_tuning)
 
+#To ensure that the hyperparameter tuning has actually yielded increased performance, models from previous parts of the process are also evaluated.
+testeval(test_set,baseline$rich_over)
+testeval(test_set,model_comparison$xgb)
 
+#The model achieves a similarly high F1 score on the test-set which suggests the model is not overfitting on the cross-validation splits.
 
-baseline_eval<-evalm(baseline,positive="DEFAULT",optimise = "F1",showplots=F)
-### TEST EVALUATION FOR THE FINAL STEP
-(tst<-testeval(test_rich,test$fit))
-
-
-
-
+#Cumulative gains chart. Caret refers to it as lift.
+test_predictions<-predict(xgb_tuning,test_set, type="prob")[,"DEFAULT"]
+liftset<-data.frame(class=test_labels,predictions=test_predictions)
+ggplot(lift(class~predictions,liftset),values=60)s
 
 ```
 

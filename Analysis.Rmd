@@ -125,15 +125,10 @@ test<-!training
 training_labels<-labels[training]
 test_labels<-labels[!training]
 
-# Code below creates 4 datasets to compare performance on defined by a grid based on richness and oversamlped/not-oversampled samples.
 
 train_sets<-list()
 train_sets$sparse<-data_defs$sparse[training,]
 train_sets$rich<-data_defs$rich[training,]
-
-#200% smote
-#train_sets$sparse_smote<-SMOTE(train_sets$sparse,training_labels,dup_size=2)[1]$data
-#train_sets$rich_smote<-SMOTE(train_sets$rich,training_labels,dup_size=2)[1]$data
 
 #Add class column
 train_sets$sparse<-train_sets$sparse %>% add_column(class=training_labels)
@@ -268,7 +263,7 @@ testeval(test_set,model_comparison$xgb)
 #Cumulative gains chart. Caret refers to it as lift.
 test_predictions<-predict(xgb_tuning,test_set, type="prob")[,"DEFAULT"]
 liftset<-data.frame(class=test_labels,predictions=test_predictions)
-ggplot(lift(class~predictions,liftset),values=60)s
+ggplot(lift(class~predictions,liftset),values=60)
 
 ```
 

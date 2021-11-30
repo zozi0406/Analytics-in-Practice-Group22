@@ -14,36 +14,52 @@ library(caret)
 library(gbm)
 library(mlbench)
 library(smotefamily)
-
+library(themis)
+library(MLmetrics)
+library(pROC)
+library(MLeval)
 ```
 
 
 ```{r import}
+
+#Import data and drop ID column
 credits <- read_csv("assignment_data.csv")
 credits$ID<-NULL
 
-# Based on readme.txt data dictionary, only a few columns are actually numeric, so all but these columns are changed to factors
+#Based on readme.txt data dictionary, keep track of all numeric columns.
 numericcols <- c("LIMIT","AGE","BILL1","BILL2","BILL3","BILL4","BILL5","BILL6","PYAMT1","PYAMT2","PYAMT3","PYAMT4","PYAMT5","PYAMT6","CREDITCRD","PY1","PY2","PY3","PY4","PY5","PY6","YEARSINADD")
+
+#Also find a list of numeric columns for later convenience.
 non_numericcols<-names(credits) %>% setdiff(numericcols)
 
+#Convert non-numeric columns to factors.
 credits[,non_numericcols] <- lapply(credits[,non_numericcols],factor)
 
-#Ordered
+#Set levels for ordered factors.
 credits$SATISFACTION<-credits$SATISFACTION %>% ordered(levels=c(0,1,2))
 credits$FREQTRANSACTION<-credits$FREQTRANSACTION %>% ordered(levels=c(0,1))
 
 #Other ordered factors like YEARSINADD and PY# are treated as numeric to reduce model sizes
 
-#Revalue class to interpret easier
+#Revalue class to allow easier interpretability
 credits$CLASS <- credits$CLASS %>% revalue(c("0"="NO_DEFAULT","1"="DEFAULT"))
 credits$CLASS <- factor(credits$CLASS, levels=rev(levels(credits$CLASS)))
 
+#Inspect summary of the data to observe ranges and factor counts.
+credits %>% summary
 
-#Drop NAs
+#Group Education=0,4,5,6 to reduce model sizes, these were tested to have no significant positive impact on predictive power.
+credits$EDUCATION<-ifelse(as.numeric(as.character(credits$EDUCATION)) %in% c(4,5,6),0,as.numeric(as.character(credits$EDUCATION))) %>% factor
+
+#PY1-6 will be dealt with below, otherwise all variables' ranges make sense for the values they represent. 
+#Even if there are outliers in the BILL variables, these are not removed, as they may provide additional information.
+
+#Drop missing values, as they cannot be reliably replaced by imputation and they constitute less than 1% of the data.
 complete <- complete.cases(credits)
 credits<-credits[complete,]
 
-# No variation in cm_hist
+# No variation in cm_hist, so drop
 credits$CM_HIST<-NULL
 
 #Age is retained instead of age category
@@ -53,12 +69,19 @@ credits$AGE_CTG<-NULL
 credits <- credits %>% distinct()
 
 
+
 ```
 
 
 ```{r baseline_datasets}
+
+#The code below creates a rich and a sparse definition of the PY1-6 variables whether to preserve 
+#or to drop the information (No transactions and paid in full) stored in its negative values.
+
+
 data_defs<-list()
 
+#Class is not included in data definitions to avoid issues with contrast encoding below. It is readded later
 data_defs$sparse<-credits %>% select(-CLASS)
 
 labels<-credits$CLASS
@@ -79,7 +102,7 @@ for (i in 1:6){
 data_defs$sparse[,numericcols]<-lapply(data_defs$sparse[,numericcols],scale) %>% lapply(`[`,c(1:nrow(data_defs$sparse)))
 data_defs$rich[,numericcols]<-lapply(data_defs$rich[,numericcols],scale) %>% lapply(`[`,c(1:nrow(data_defs$rich)))
 
-#Apply Contrast encoding to non-numeric variables
+#Apply default contrast encoding to non-numeric variables
 data_defs$sparse<-model.matrix(~.+1,data_defs$sparse)[,-1] %>% as_tibble
 data_defs$rich<-model.matrix(~.+1,data_defs$rich)[,-1] %>% as_tibble
 ```
@@ -89,157 +112,137 @@ data_defs$rich<-model.matrix(~.+1,data_defs$rich)[,-1] %>% as_tibble
 
 
 ```{r sample_splitting_and_sampling}
-set.seed(100)
+#REWRITE
 
+#Set seed for reproducability
+set.seed(100)
+#Create training and test sample splits
 training<-sample.split(credits$CLASS,SplitRatio = 0.8)
 test<-!training
 training_labels<-labels[training]
 test_labels<-labels[!training]
+
+# Code below creates 4 datasets to compare performance on defined by a grid based on richness and oversamlped/not-oversampled samples.
 
 train_sets<-list()
 train_sets$sparse<-data_defs$sparse[training,]
 train_sets$rich<-data_defs$rich[training,]
 
 #200% smote
-train_sets$sparse_smote<-SMOTE(train_sets$sparse,training_labels,dup_size=2)[1]$data
-train_sets$rich_smote<-SMOTE(train_sets$rich,training_labels,dup_size=2)[1]$data
+#train_sets$sparse_smote<-SMOTE(train_sets$sparse,training_labels,dup_size=2)[1]$data
+#train_sets$rich_smote<-SMOTE(train_sets$rich,training_labels,dup_size=2)[1]$data
 
 #Add class column
 train_sets$sparse<-train_sets$sparse %>% add_column(class=training_labels)
 train_sets$rich<-train_sets$rich %>% add_column(class=training_labels)
 
+#Define test sets for the two data definitions
 test_sparse<-data_defs$sparse[!training,] %>% add_column(class=test_labels)
 test_rich<-data_defs$rich[!training,] %>% add_column(class=test_labels)
 ```
 
 
-```{r baseline_modeling}
-set.seed(100)
+```{r baseline_modeling, warning=FALSE}
+#Modelling is done via caret's train() framework.
+#Define settings for cross-validation and model evaluation
+tc_normal<-trainControl(method = "cv" ,number = 5 ,allowParallel = T,classProbs = TRUE,summaryFunction = prSummary, savePredictions = TRUE)
+tc_smote<-trainControl(method = "cv" ,number = 5 ,allowParallel = T,classProbs = TRUE,summaryFunction = prSummary,sampling="smote", savePredictions = TRUE)
+tc_over<-trainControl(method = "cv" ,number = 5 ,allowParallel = T,classProbs = TRUE,summaryFunction = prSummary,sampling="up", savePredictions = TRUE)
+tc_under<-trainControl(method = "cv" ,number = 5 ,allowParallel = T,classProbs = TRUE,summaryFunction = prSummary,sampling="down", savePredictions = TRUE)
 
-tc<-trainControl(method = "cv" ,number = 5 ,allowParallel = T,classProbs = TRUE,summaryFunction = twoClassSummary)
-
-evaluate_model <- function(formula=class~.,data,method,train_control=tc,tuneLength=1, grid=NULL, ...) {
-  
-  fit<-train(form=formula,data=data,method=method,trControl=train_control,metric="ROC",maximize=T,tuneGrid=grid,tuneLength=tuneLength,...)
-  
-  cm<-confusionMatrix.train(fit)
-  
-  return(list(fit=fit,cm=cm))
+#Define function for cross-validated model evaluation
+evaluate_model <- function(formula=class~.,data,method,train_control=tc_normal,tuneLength=1, grid=NULL, ...) {
+  #Set seed again to ensure consistent data-splits for cross-validation
+  set.seed(100)
+  fit<-train(form=formula,data=data,method=method,trControl=train_control,metric="F",maximize=T,tuneGrid=grid,tuneLength=tuneLength,...)
+  return(fit)
 }
 
-
+#Define function for evaluation on test data.
 testeval <- function(data,fit){
   preds<-predict(fit,data)
   cm<-confusionMatrix(preds,data$class)
   return(cm)
 }
 
-
-### EXAMPLE USAGE
-
-### train_sets includes the 4 candidate datasets for modeling, sparse and rich & oversampled versions. The above function automatically runs cross-validation to check sensitivity to sample selection. At the end during test evaluation, use test_sparse or test_rich for both the normal and the oversampled models
+#Given its consistent track record across the literature and its non-reliance on hyperparameters, the logistic regression is used to evaluate, which dataset to use for modeling
 
 
-## Change data and method, once you have chosen a final model, you can do automated Hyperparameter tuning by increasing tuneLength. And possibly (but not necessarily) define a grid. You can define a grid to choose default parameters too.
+#Note, when oversampling, the cross-validation scores will not be comparable across 
 
-## You can also just let it choose it's own grid by not specifying a grid at all. (Pass a NULL)
 
-tunegrid <- expand.grid(n.trees=100,interaction.depth=1,shrinkage=0.01,n.minobsinnode=10)
-test<-evaluate_model(data=train_sets$rich_smote, method="gbm",verbose=T,tuneLength=1,grid=tunegrid)
+baseline=list()
+baseline$sparse<-evaluate_model(data=train_sets$sparse, method="glm")
+baseline$sparse_smote<-evaluate_model(data=train_sets$sparse, method="glm",train_control=tc_smote)
+baseline$sparse_over<-evaluate_model(data=train_sets$sparse, method="glm",train_control=tc_over)
+baseline$sparse_under<-evaluate_model(data=train_sets$sparse, method="glm",train_control=tc_under)
+baseline$rich<-evaluate_model(data=train_sets$rich, method="glm")
+baseline$rich_smote<-evaluate_model(data=train_sets$rich, method="glm",train_control=tc_smote)
+baseline$rich_over<-evaluate_model(data=train_sets$rich, method="glm",train_control=tc_over)
+baseline$rich_under<-evaluate_model(data=train_sets$rich, method="glm",train_control=tc_under)
 
-test$fit
-test$cm
+baseline_res <- data.frame()
+for (i in names(baseline)) {
+    baseline_res<-baseline[[i]]$results %>% add_column(dataset=i) %>%  bind_rows(baseline_res)
+}
 
+#Note, the AUC included here refers to the area under the PRG (Precision-Recall gain) curve.
+#The main metric used here is the F score which attempts to balance Precision and Recall.
+
+baseline_res %>% arrange(desc(F))
+
+#The rich_over sample is used, which uses caret's built-in random over-sampling algorithm.
+#Although the selection of a different cutoff may yield different results, 
+#due to limited computing capacity, at this stage optimising the threshold is not possible.
+
+
+
+training_set<-train_sets$rich
+test_set<-test_rich
+train_control<-tc_over
+
+model_comparison<-list()
+
+model_comparison$glm<-evaluate_model(data=training_set, method="glm",train_control = train_control)
+model_comparison$glmnet<-evaluate_model(data=training_set, method="glmnet",train_control = train_control)
+model_comparison$gbm<-evaluate_model(data=training_set, method="gbm",train_control = train_control)
+model_comparison$rf<-evaluate_model(data=training_set, method="rf",train_control = train_control)
+model_comparison$svm_lin<-evaluate_model(data=training_set, method="svmLinear",train_control = train_control)
+model_comparison$svm<-evaluate_model(data=training_set, method="svmRadial",train_control = train_control)
+model_comparison$xgb<-evaluate_model(data=training_set, method="xgbTree",train_control = train_control)
+model_comparison$tree<-evaluate_model(data=training_set, method="C5.0",train_control = train_control)
+model_comparison$nnet<-evaluate_model(data=training_set, method="nnet",train_control = train_control)
+
+model_res <- data.frame()
+for (i in names(model_comparison)) {
+    model_res<-model_comparison[[i]]$results %>% add_column(dataset=i) %>%  bind_rows(model_res)
+}
+
+#Note, the AUC included here refers to the area under the PRG (Precision-Recall gain) curve.
+#The main metric used here is the F score which attempts to balance Precision and Recall.
+
+model_res %>% arrange(desc(F))
+
+
+
+
+
+
+
+
+baseline_eval<-evalm(baseline,positive="DEFAULT",optimise = "F1",showplots=F)
 ### TEST EVALUATION FOR THE FINAL STEP
 (tst<-testeval(test_rich,test$fit))
 
-# Have fun!!! :D
 
 
-
-```
-
-
-```{r baseline_modeling_try}
-
-set.seed(100)
-
-tc<-trainControl(method = "cv" ,number = 5 ,allowParallel = T,classProbs = TRUE,summaryFunction = twoClassSummary)
-
-evaluate_model <-
-function(formula=class~.,data,method,train_control=tc,tuneLength=1, grid=NULL, ...) {
-  
-  # Train the model
-  fit <- train(form=formula,
-             data=data,
-             method=method,
-             trControl=train_control,
-             metric="ROC",
-             maximize=T,
-             tuneGrid=grid,
-             tuneLength=tuneLength,
-             verbose = FALSE)
-  
-  cm <- confusionMatrix.train(fit)
-  
-  return(list(fit=fit,cm=cm))
-}
-
-testeval <- function(data,fit){
-  preds <- predict(fit,data)
-  cm <- confusionMatrix(preds,
-                        data$class,
-                        mode = "prec_recall")
-  return(cm)
-}
-
-
-tunegrid <- expand.grid(n.trees=100,
-                        interaction.depth = c(1, 5, 9),
-                        shrinkage=0.1,
-                        n.minobsinnode=10)
-
-# rich_smote
-test_rich_smote <- evaluate_model(data=train_sets$rich_smote, method="gbm",verbose=T,tuneLength=1,grid=tunegrid)
-
-test_rich_smote$fit
-test_rich_smote$cm
-
-### TEST EVALUATION FOR THE FINAL STEP
-(tst<-testeval(test_rich,test_rich_smote$fit))
 
 
 ```
 
-```{r}
-# sparse_smote
-test<-evaluate_model(data=train_sets$sparse_smote, method="gbm",verbose=T,tuneLength=1,grid=tunegrid)
 
-test$fit
-test$cm
+```{r Produce_charts}
 
-### TEST EVALUATION FOR THE FINAL STEP
-(tst<-testeval(test_sparse,test$fit))
-```
 
-```{r}
-# sparse
-test<-evaluate_model(data=train_sets$sparse, method="gbm",verbose=T,tuneLength=1,grid=tunegrid)
 
-test$fit
-test$cm
-
-### TEST EVALUATION FOR THE FINAL STEP
-(tst<-testeval(test_sparse,test$fit))
-```
-
-```{r}
-# rich_smote
-test<-evaluate_model(data=train_sets$rich, method="gbm",verbose=T,tuneLength=1,grid=tunegrid)
-
-test$fit
-test$cm
-
-### TEST EVALUATION FOR THE FINAL STEP
-(tst<-testeval(test_rich,test$fit))
 ```

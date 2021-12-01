@@ -59,6 +59,7 @@ credits <- credits %>% distinct()
 ```{r baseline_datasets}
 data_defs<-list()
 
+# explain the 
 data_defs$sparse<-credits %>% select(-CLASS)
 
 labels<-credits$CLASS
@@ -83,9 +84,6 @@ data_defs$rich[,numericcols]<-lapply(data_defs$rich[,numericcols],scale) %>% lap
 data_defs$sparse<-model.matrix(~.+1,data_defs$sparse)[,-1] %>% as_tibble
 data_defs$rich<-model.matrix(~.+1,data_defs$rich)[,-1] %>% as_tibble
 ```
-
-
-
 
 
 ```{r sample_splitting_and_sampling}
@@ -134,24 +132,15 @@ testeval <- function(data,fit){
   return(cm)
 }
 
-
-### EXAMPLE USAGE
-
-### train_sets includes the 4 candidate datasets for modeling, sparse and rich & oversampled versions. The above function automatically runs cross-validation to check sensitivity to sample selection. At the end during test evaluation, use test_sparse or test_rich for both the normal and the oversampled models
-
-
-## Change data and method, once you have chosen a final model, you can do automated Hyperparameter tuning by increasing tuneLength. And possibly (but not necessarily) define a grid. You can define a grid to choose default parameters too.
-
-## You can also just let it choose it's own grid by not specifying a grid at all. (Pass a NULL)
-
 tunegrid <- expand.grid(n.trees=100,interaction.depth=1,shrinkage=0.01,n.minobsinnode=10)
-test<-evaluate_model(data=train_sets$rich_smote, method="gbm",verbose=T,tuneLength=1,grid=tunegrid)
 
-test$fit
-test$cm
+rich_smote_test<-evaluate_model(data=train_sets$rich_smote, method="gbm",verbose=T,tuneLength=1,grid=tunegrid)
+
+rich_smote_test$fit
+rich_smote_test$cm
 
 ### TEST EVALUATION FOR THE FINAL STEP
-(tst<-testeval(test_rich,test$fit))
+(sparse_smote_tst<-testeval(test_rich,rich_smote_test$fit))
 
 # Have fun!!! :D
 
@@ -159,67 +148,57 @@ test$cm
 
 ```
 
+```{r chart}
 
-```{r baseline_modeling_try}
+# feature plot
+#x = select(test_rich,PY1:PY6)
+#y= test_rich$class
+#featurePlot(x, y, "box", jitter = TRUE)
 
-set.seed(100)
-
-tc<-trainControl(method = "cv" ,number = 5 ,allowParallel = T,classProbs = TRUE,summaryFunction = twoClassSummary)
-
-evaluate_model <-
-function(formula=class~.,data,method,train_control=tc,tuneLength=1, grid=NULL, ...) {
-  
-  # Train the model
-  fit <- train(form=formula,
-             data=data,
-             method=method,
-             trControl=train_control,
-             metric="ROC",
-             maximize=T,
-             tuneGrid=grid,
-             tuneLength=tuneLength,
-             verbose = FALSE)
-  
-  cm <- confusionMatrix.train(fit)
-  
-  return(list(fit=fit,cm=cm))
-}
-
-testeval <- function(data,fit){
-  preds <- predict(fit,data)
-  cm <- confusionMatrix(preds,
-                        data$class,
-                        mode = "prec_recall")
-  return(cm)
-}
+# Create Data to Plot a Learning Curve
+set.seed(111)
+chart_data <- as.data.frame(train_sets$rich_smote)
+lc <-
+  learning_curve_dat(chart_data,
+                     outcome = "class",
+                     method = "gbm",
+                     metric = "ROC",
+                     trControl = tc)
 
 
-tunegrid <- expand.grid(n.trees=100,
-                        interaction.depth = c(1, 5, 9),
-                        shrinkage=0.1,
-                        n.minobsinnode=10)
-
-# rich_smote
-test_rich_smote <- evaluate_model(data=train_sets$rich_smote, method="gbm",verbose=T,tuneLength=1,grid=tunegrid)
-
-test_rich_smote$fit
-test_rich_smote$cm
-
-### TEST EVALUATION FOR THE FINAL STEP
-(tst<-testeval(test_rich,test_rich_smote$fit))
+ggplot(lc, aes(ROC,Training_Size),color = Data) +
+  geom_smooth(method = loess, span = .8) +
+  theme_bw()
 
 
+
+# densityplot:"Score distribution for binary model"
+pl1 <- densityplot(sparse_smote_test$fit,alpha = 0.6,adjust = 1.25)
+pl2 <- densityplot(rich_smote_test$fit,alpha = 0.6,adjust = 1.25)
+pl3 <- densityplot(rich_test$fit,alpha = 0.6,adjust = 1.25)
+pl3 <- densityplot(sparse_test$fit,alpha = 0.6,adjust = 1.25)
+# 
+
+dotPlot(varImp(test$fit))
+
+chart.fit <- gbm(class~., data = rich_smote_test$fit, n.trees = 250, interaction.depth = 3)
+chart.exp <- explain(chart.fit,
+                        data = train_sets$rich_smote,
+                        y = train_sets$rich_smote$class,
+                        predict_function = function(m,x)
+                          predict(m, x, n.trees = 250))
 ```
+
 
 ```{r}
 # sparse_smote
-test<-evaluate_model(data=train_sets$sparse_smote, method="gbm",verbose=T,tuneLength=1,grid=tunegrid)
+sparse_smote_test<-evaluate_model(data=train_sets$sparse_smote, method="gbm",verbose=T,tuneLength=1,grid=tunegrid)
 
-test$fit
-test$cm
+sparse_smote_test$fit
+sparse_smote_test$cm
 
 ### TEST EVALUATION FOR THE FINAL STEP
-(tst<-testeval(test_sparse,test$fit))
+(sparse_smote_tst<-testeval(test_sparse,sparse_smote_test$fit))
 ```
 
 ```{r}
@@ -243,3 +222,4 @@ test$cm
 ### TEST EVALUATION FOR THE FINAL STEP
 (tst<-testeval(test_rich,test$fit))
 ```
+

@@ -88,6 +88,9 @@ credits$AGE_CTG<-NULL
 #Remove duplicates
 credits <- credits %>% distinct()
 
+#Identify class imbalance problem
+ggplot(credits,aes(y=CLASS,x=..count..))+geom_bar(fill="coral2")+labs(title="Distribution of target class",x="Count",y="Class label") + theme_bw()
+
 
 
 ```
@@ -134,7 +137,7 @@ data_defs$rich<-model.matrix(~.+1,data_defs$rich)[,-1] %>% as_tibble
 ```{r sample_splitting_and_sampling}
 #REWRITE
 
-#Set seed for reproducability
+#Set seed for reproducibility
 set.seed(100)
 #Create training and test sample splits
 training<-sample.split(credits$CLASS,SplitRatio = 0.8)
@@ -297,7 +300,8 @@ ggplot(test_F1s,aes(x=F,y=reorder(model,F))) +geom_col(fill="coral2")+theme_bw()
 #Cumulative gains chart. Caret refers to it as lift.
 test_predictions<-predict(xgb_tuning,test_set, type="prob")[,"DEFAULT"]
 liftset<-data.frame(class=test_labels,predictions=test_predictions)
-ggplot(lift(class~predictions,liftset),values=60)
+lift_vals<-lift(class~predictions,liftset)
+ggplot(lift_vals,values=60) + theme_bw()
 
 ```
 

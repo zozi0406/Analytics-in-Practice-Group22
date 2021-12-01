@@ -11,6 +11,7 @@ library(plyr)
 library(tidyverse)
 library(caTools)
 library(caret)
+library(DataExplorer)
 library(gbm)
 library(mlbench)
 library(smotefamily)
@@ -19,15 +20,20 @@ library(MLmetrics)
 library(pROC)
 library(MLeval)
 library(rpart)
-
 library(glmnet)
 ```
 
 
 ```{r import}
 
-#Import data and drop ID column
+#Import data
 credits <- read_csv("assignment_data.csv")
+
+
+#Inspect the structure of the data
+credits %>% str
+
+#Drop ID column
 credits$ID<-NULL
 
 #Based on readme.txt data dictionary, keep track of all numeric columns.
@@ -49,20 +55,31 @@ credits$FREQTRANSACTION<-credits$FREQTRANSACTION %>% ordered(levels=c(0,1))
 credits$CLASS <- credits$CLASS %>% revalue(c("0"="NO_DEFAULT","1"="DEFAULT"))
 credits$CLASS <- factor(credits$CLASS, levels=rev(levels(credits$CLASS)))
 
-#Inspect summary of the data to observe ranges and factor counts.
-credits %>% summary
+
+
+
+
+#Drop missing values, as they cannot be reliably replaced by imputation and they constitute less than 1% of the data.
+DataExplorer::plot_missing(credits)
+complete <- complete.cases(credits)
+credits<-credits[complete,]
+
+#Plot discrete features
+plot_bar(credits)
 
 #Group Education=0,4,5,6 to reduce model sizes, these were tested to have no significant positive impact on predictive power.
 credits$EDUCATION<-ifelse(as.numeric(as.character(credits$EDUCATION)) %in% c(4,5,6),0,as.numeric(as.character(credits$EDUCATION))) %>% factor
 
-#PY1-6 will be dealt with below, otherwise all variables' ranges make sense for the values they represent. 
-#Even if there are outliers in the BILL variables, these are not removed, as they may provide additional information.
+#Plot continuous features
+plot_histogram(credits)
+#PY1-6 negative values will be dealt with below, otherwise all variables' ranges make sense for the values they represent. 
+#Even though there are outliers in the BILL and PYAMT variables, these are not removed, as they may provide additional predictive information.
 
-#Drop missing values, as they cannot be reliably replaced by imputation and they constitute less than 1% of the data.
-complete <- complete.cases(credits)
-credits<-credits[complete,]
+#To confirm the ranges of the variables:
+credits %>% summary
+#The ranges do not fall outside of heuristically realistic ranges even for the variables with outliers.
 
-# No variation in cm_hist, so drop
+# No variation in cm_hist, so dropped
 credits$CM_HIST<-NULL
 
 #Age is retained instead of age category
@@ -84,7 +101,7 @@ credits <- credits %>% distinct()
 
 data_defs<-list()
 
-#Class is not included in data definitions to avoid issues with contrast encoding below. It is readded later
+#Class is not included in data definitions to avoid issues with contrast encoding below. It is re-added later
 data_defs$sparse<-credits %>% select(-CLASS)
 
 labels<-credits$CLASS
@@ -137,6 +154,9 @@ train_sets$rich<-train_sets$rich %>% add_column(class=training_labels)
 #Define test sets for the two data definitions
 test_sparse<-data_defs$sparse[!training,] %>% add_column(class=test_labels)
 test_rich<-data_defs$rich[!training,] %>% add_column(class=test_labels)
+
+#Clear up RAM used for redundant dataframes
+rm(credits,data_defs)
 ```
 
 
@@ -187,17 +207,21 @@ for (i in names(baseline)) {
 #Note, the AUC included here refers to the area under the PRG (Precision-Recall gain) curve.
 #The main metric used here is the F score which attempts to balance Precision and Recall.
 
-baseline_res %>% arrange(desc(F))
+ggplot(baseline_res,aes(x=F,y=reorder(dataset,F))) +geom_col(fill="coral2")+theme_bw()+labs(y="Dataset & Sampling",x="F1 score",title="Logistic regression F1 scores datasets and sampling methods")
 
 #The rich_over sample is used, which uses caret's built-in random over-sampling algorithm.
 #Although the selection of a different cutoff may yield different results, 
 #due to limited computing capacity, at this stage optimising the threshold is not possible.
 
 
-
 training_set<-train_sets$rich
 test_set<-test_rich
 train_control<-tc_over
+
+
+```
+
+```{r model_choice, warning=FALSE}
 
 model_comparison<-list()
 
@@ -208,27 +232,31 @@ model_comparison<-list()
 
 
 #Logistic regression has no hyperparameters
-model_comparison$glm<-evaluate_model(data=training_set, method="glm",train_control = train_control)
+model_comparison$Logistic_regression<-evaluate_model(data=training_set, method="glm",train_control = train_control)
 #Regularized (L1 and L2) logistic regression
-model_comparison$glmnet<-evaluate_model(data=training_set, method="glmnet",train_control = train_control)
+model_comparison$Penalised_Logistic_Regression<-evaluate_model(data=training_set, method="glmnet",train_control = train_control)
 #Gradient-boosting machine
-model_comparison$gbm<-evaluate_model(data=training_set, method="gbm",train_control = train_control,verbose=F)
+model_comparison$GBM<-evaluate_model(data=training_set, method="gbm",train_control = train_control,verbose=F)
 #XGBoost
-model_comparison$xgb<-evaluate_model(data=training_set, method="xgbTree",train_control = train_control)
+model_comparison$XGBoost<-evaluate_model(data=training_set, method="xgbTree",train_control = train_control)
 #Decision tree
-model_comparison$rpart<-evaluate_model(data=training_set, method="rpart",train_control = train_control)
+model_comparison$Tree<-evaluate_model(data=training_set, method="rpart",train_control = train_control)
 
 model_res <- data.frame()
 for (i in names(model_comparison)) {
-    model_res<-model_comparison[[i]]$results[1,] %>% add_column(dataset=i) %>% select(dataset,F,Recall,Precision) %>% bind_rows(model_res)
+    model_res<-model_comparison[[i]]$results[1,] %>% add_column(model=i) %>% select(model,F,Recall,Precision) %>% bind_rows(model_res)
 }
 
 #Note, the AUC included here refers to the area under the PRG (Precision-Recall gain) curve.
 #The main metric used here is the F score which attempts to balance Precision and Recall.
 
 #XGBoost, a variation of the gradient boosting algorithm seems to be performing the best with default hyperparameters. This will be tuned further to determine the final model.
-model_res %>% arrange(desc(F))
+ggplot(model_res,aes(x=F,y=reorder(model,F))) +geom_col(fill="coral2")+theme_bw()+labs(y="Model",x="F1 score",title="F1 scores across algorithms with default hyperparameters")
 
+```
+
+
+```{r Hyperparameter_tuning_and_final_model}
 
 #The recent update to XGboost introduced a deprecation warning, which is silenced below. The rest of the functionality remains as intended.
 #The below command creates a grid of n^5 models and chooses the one with the optimal Cross-validated F1_score.
@@ -252,13 +280,19 @@ if (!file.exists("xgb_tuning.rds")){
 #Due to the nature of gradient boosting models and xgboost's parallel processing, the exact result varies slightly from the one achieved above, despite setting a random seed before training. Nonetheless, the result is not significantly different.
 
 #The xgb_tuning tuning object automatically selects the final model as the one with the highest F1_score, which can be used to evaluate the model performance on the test set.
-testeval(test_set,xgb_tuning)
+(test1<-testeval(test_set,xgb_tuning))
 
 #To ensure that the hyperparameter tuning has actually yielded increased performance, models from previous parts of the process are also evaluated.
-testeval(test_set,baseline$rich_over)
-testeval(test_set,model_comparison$xgb)
+(test2<-testeval(test_set,model_comparison$XGBoost))
+(test3<-testeval(test_set,baseline$rich_over))
+
+
+test_F1s<-data.frame(model=c("Final model","Default XGBoost","Logistic Regression"),F=c(test1$byClass["F1"],test2$byClass["F1"],test3$byClass["F1"]))
 
 #The model achieves a similarly high F1 score on the test-set which suggests the model is not overfitting on the cross-validation splits.
+ggplot(test_F1s,aes(x=F,y=reorder(model,F))) +geom_col(fill="coral2")+theme_bw()+labs(y="Model",x="F1 score",title="F1 scores across algorithms with default hyperparameters")
+
+
 
 #Cumulative gains chart. Caret refers to it as lift.
 test_predictions<-predict(xgb_tuning,test_set, type="prob")[,"DEFAULT"]

@@ -279,11 +279,22 @@ if (!file.exists("xgb_tuning.rds")){
   xgb_tuning <- readRDS("xgb_tuning.rds")
 }
 
+#Single threading specified to eliminate discrepancies due to parallel processing.
+capture.output(final_xgb<-evaluate_model(data=training_set,method="xgbTree",train_control=train_control,grid=expand.grid(
+    "eta"=c(0.05),
+    "min_child_weight"=c(2),
+    "max_depth"=c(3),
+    "nrounds"=c(100),
+    "gamma"=c(0.2),
+    "subsample"=c(1),
+    "colsample_bytree"=c(0.75)),nthread=1),file=nullfile())
+
+
 
 #Due to the nature of gradient boosting models and xgboost's parallel processing, the exact result varies slightly from the one achieved above, despite setting a random seed before training. Nonetheless, the result is not significantly different.
 
 #The xgb_tuning tuning object automatically selects the final model as the one with the highest F1_score, which can be used to evaluate the model performance on the test set.
-(test1<-testeval(test_set,xgb_tuning))
+(test1<-testeval(test_set,final_xgb))
 
 #To ensure that the hyperparameter tuning has actually yielded increased performance, models from previous parts of the process are also evaluated.
 (test2<-testeval(test_set,model_comparison$XGBoost))
@@ -298,9 +309,15 @@ ggplot(test_F1s,aes(x=F,y=reorder(model,F))) +geom_col(fill="coral2")+theme_bw()
 
 
 #Cumulative gains chart. Caret refers to it as lift.
-test_predictions<-predict(xgb_tuning,test_set, type="prob")[,"DEFAULT"]
-liftset<-data.frame(class=test_labels,predictions=test_predictions)
-lift_vals<-lift(class~predictions,liftset)
+test_predictions<-predict(final_xgb,test_set, type="prob")[,"DEFAULT"]
+pred_and_true<-data.frame(class=test_labels,predictions=test_predictions)
+roc_vals<-roc(class~predictions,pred_and_true,levels=c("NO_DEFAULT","DEFAULT"))
+ROC_out<-data.frame(sensitivity=roc_vals$sensitivities,specificity=roc_vals$specificities,thresholds=roc_vals$thresholds)
+write.csv(ROC_out,"roc.csv")
+write.csv(test_predictions,"test_preds.csv")
+
+
+lift_vals<-lift(class~predictions,pred_and_true)
 ggplot(lift_vals,values=60) + theme_bw()
 
 ```

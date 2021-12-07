@@ -60,7 +60,9 @@ credits$CLASS <- factor(credits$CLASS, levels=rev(levels(credits$CLASS)))
 
 
 #Drop missing values, as they cannot be reliably replaced by imputation and they constitute less than 1% of the data.
-DataExplorer::plot_missing(credits)
+DataExplorer::plot_missing(credits,missing_only = T,title="Missing values in the dataset",group=list("Missing"=0.05))
+ggsave("missing_plot.jpg",dpi=500)
+
 complete <- complete.cases(credits)
 credits<-credits[complete,]
 

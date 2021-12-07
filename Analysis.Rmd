@@ -325,6 +325,19 @@ ggplot(lift_vals,values=60) + theme_bw()
 
 ```{r Produce_charts}
 
+evaluation_res <- data.frame()
+for (i in names(baseline)) {
+    evaluation_res<-baseline[[i]]$results[1,] %>% add_column(dataset=i) %>%  bind_rows(baseline_res)}
 
+#ggplot(baseline_res,aes(x=F,y=reorder(dataset,F))) +geom_col(fill="coral2")+theme_bw()+labs(y="Dataset & Sampling",x="F1 score",title="Logistic regression F1 scores datasets and sampling methods")
+
+for (i in names(model_comparison)) {
+    evaluation_res<-model_comparison[[i]]$results[1,] %>% add_column(model=i) %>% select(model,F,Recall,Precision) %>% bind_rows(model_res)
+}
+
+
+#ggplot(model_res,aes(x=F,y=reorder(model,F))) +geom_col(fill="coral2")+theme_bw()+labs(y="Model",x="F1 score",title="F1 scores across algorithms with default hyperparameters")
+
+#test_F1s<-data.frame(model=c(,"Default XGBoost","Logistic Regression","Final model"),F=c(test1$byClass["F1"],test2$byClass["F1"],test3$byClass["F1"]))
 
 ```

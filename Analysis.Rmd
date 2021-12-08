@@ -14,11 +14,9 @@ library(caret)
 library(DataExplorer)
 library(gbm)
 library(mlbench)
-library(smotefamily)
 library(themis)
 library(MLmetrics)
 library(pROC)
-library(MLeval)
 library(rpart)
 library(glmnet)
 ```
@@ -28,7 +26,6 @@ library(glmnet)
 
 #Import data
 credits <- read_csv("assignment_data.csv")
-
 
 #Inspect the structure of the data
 credits %>% str
@@ -54,10 +51,6 @@ credits$FREQTRANSACTION<-credits$FREQTRANSACTION %>% ordered(levels=c(0,1))
 #Revalue class to allow easier interpretability
 credits$CLASS <- credits$CLASS %>% revalue(c("0"="NO_DEFAULT","1"="DEFAULT"))
 credits$CLASS <- factor(credits$CLASS, levels=rev(levels(credits$CLASS)))
-
-
-
-
 
 #Drop missing values, as they cannot be reliably replaced by imputation and they constitute less than 1% of the data.
 DataExplorer::plot_missing(credits,missing_only = T,title="Missing values in the dataset",group=list("Missing"=0.05))
@@ -103,7 +96,6 @@ ggplot(credits,aes(y=CLASS,x=..count..))+geom_bar(fill="coral2")+labs(title="Dis
 #The code below creates a rich and a sparse definition of the PY1-6 variables whether to preserve 
 #or to drop the information (No transactions and paid in full) stored in its negative values.
 
-
 data_defs<-list()
 
 #Class is not included in data definitions to avoid issues with contrast encoding below. It is re-added later
@@ -137,8 +129,6 @@ data_defs$rich<-model.matrix(~.+1,data_defs$rich)[,-1] %>% as_tibble
 
 
 ```{r sample_splitting_and_sampling}
-#REWRITE
-
 #Set seed for reproducibility
 set.seed(100)
 #Create training and test sample splits
@@ -191,9 +181,6 @@ testeval <- function(data,fit){
 #Given its consistent track record across the literature and its non-reliance on hyperparameters, the logistic regression is used to evaluate, which dataset to use for modeling
 
 
-#Note, when oversampling, the cross-validation scores will not be comparable across 
-
-
 baseline=list()
 baseline$sparse<-evaluate_model(data=train_sets$sparse, method="glm")
 baseline$sparse_smote<-evaluate_model(data=train_sets$sparse, method="glm",train_control=tc_smote)
@@ -213,6 +200,7 @@ for (i in names(baseline)) {
 #The main metric used here is the F score which attempts to balance Precision and Recall.
 
 ggplot(baseline_res,aes(x=F,y=reorder(dataset,F))) +geom_col(fill="coral2")+theme_bw()+labs(y="Dataset & Sampling",x="F1 score",title="Logistic regression F1 scores datasets and sampling methods")
+ggsave("Baseline.jpg",dpi=500)
 
 #The rich_over sample is used, which uses caret's built-in random over-sampling algorithm.
 #Although the selection of a different cutoff may yield different results, 
@@ -230,10 +218,6 @@ train_control<-tc_over
 
 model_comparison<-list()
 
-#The key common features of the algorithms compared below include scalability and speed.
-#Although other classification algorithms may also do well, their computational costs tend to scale significantly with observations and variables.
-#As heuristics do not allow to drop any variables in this case, only such methods are explored that scale efficiently and are not prone to overfit
-#when including a high number of features.
 
 
 #Logistic regression has no hyperparameters
@@ -257,6 +241,7 @@ for (i in names(model_comparison)) {
 
 #XGBoost, a variation of the gradient boosting algorithm seems to be performing the best with default hyperparameters. This will be tuned further to determine the final model.
 ggplot(model_res,aes(x=F,y=reorder(model,F))) +geom_col(fill="coral2")+theme_bw()+labs(y="Model",x="F1 score",title="F1 scores across algorithms with default hyperparameters")
+ggsave("model_comp.jpg",dpi=500)
 
 ```
 
@@ -264,24 +249,23 @@ ggplot(model_res,aes(x=F,y=reorder(model,F))) +geom_col(fill="coral2")+theme_bw(
 ```{r Hyperparameter_tuning_and_final_model}
 
 #The recent update to XGboost introduced a deprecation warning, which is silenced below. The rest of the functionality remains as intended.
-#The below command creates a grid of n^5 models and chooses the one with the optimal Cross-validated F1_score.
 
 #The following grid search is a reduced version of a longer tuning process to indicate the methodology.
-if (!file.exists("xgb_tuning.rds")){
-  capture.output(xgb_tuning<-evaluate_model(data=training_set,method="xgbTree",train_control=train_control,grid=expand.grid(
-    "eta"=c(0.1,0.05),
-    "min_child_weight"=c(2,3),
-    "max_depth"=c(2,3),
-    "nrounds"=c(50,100),
-    "gamma"=c(0.1,0.2),
-    "subsample"=c(0.9,1),
-    "colsample_bytree"=c(0.75,0.85))),file=nullfile())
-  saveRDS(xgb_tuning,"xgb_tuning.rds")
-} else {
-  xgb_tuning <- readRDS("xgb_tuning.rds")
-}
+# if (!file.exists("xgb_tuning.rds")){
+#   capture.output(xgb_tuning<-evaluate_model(data=training_set,method="xgbTree",train_control=train_control,grid=expand.grid(
+#     "eta"=c(0.1,0.05),
+#     "min_child_weight"=c(2,3),
+#     "max_depth"=c(2,3),
+#     "nrounds"=c(50,100),
+#     "gamma"=c(0.1,0.2),
+#     "subsample"=c(0.9,1),
+#     "colsample_bytree"=c(0.75,0.85))),file=nullfile())
+#   saveRDS(xgb_tuning,"xgb_tuning.rds")
+# } else {
+#   xgb_tuning <- readRDS("xgb_tuning.rds")
+# }
 
-#Single threading specified to eliminate discrepancies due to parallel processing.
+#Single threading specified to eliminate potential discrepancies due to parallel processing.
 capture.output(final_xgb<-evaluate_model(data=training_set,method="xgbTree",train_control=train_control,grid=expand.grid(
     "eta"=c(0.05),
     "min_child_weight"=c(2),
@@ -292,22 +276,18 @@ capture.output(final_xgb<-evaluate_model(data=training_set,method="xgbTree",trai
     "colsample_bytree"=c(0.75)),nthread=1),file=nullfile())
 
 
-
-#Due to the nature of gradient boosting models and xgboost's parallel processing, the exact result varies slightly from the one achieved above, despite setting a random seed before training. Nonetheless, the result is not significantly different.
-
-#The xgb_tuning tuning object automatically selects the final model as the one with the highest F1_score, which can be used to evaluate the model performance on the test set.
-(test1<-testeval(test_set,final_xgb))
+test1<-testeval(test_set,final_xgb)
 
 #To ensure that the hyperparameter tuning has actually yielded increased performance, models from previous parts of the process are also evaluated.
-(test2<-testeval(test_set,model_comparison$XGBoost))
-(test3<-testeval(test_set,baseline$rich_over))
+test2<-testeval(test_set,model_comparison$XGBoost)
+test3<-testeval(test_set,baseline$rich_over)
 
 
 test_F1s<-data.frame(model=c("Final model","Default XGBoost","Logistic Regression"),F=c(test1$byClass["F1"],test2$byClass["F1"],test3$byClass["F1"]))
 
 #The model achieves a similarly high F1 score on the test-set which suggests the model is not overfitting on the cross-validation splits.
 ggplot(test_F1s,aes(x=F,y=reorder(model,F))) +geom_col(fill="coral2")+theme_bw()+labs(y="Model",x="F1 score",title="F1 scores across algorithms with default hyperparameters")
-
+ggsave("test_scores.jpg",dpi=500)
 
 
 #Cumulative gains chart. Caret refers to it as lift.
@@ -317,16 +297,5 @@ roc_vals<-roc(class~predictions,pred_and_true,levels=c("NO_DEFAULT","DEFAULT"))
 ROC_out<-data.frame(sensitivity=roc_vals$sensitivities,specificity=roc_vals$specificities,thresholds=roc_vals$thresholds)
 write.csv(ROC_out,"roc.csv")
 write.csv(test_predictions,"test_preds.csv")
-
-
-lift_vals<-lift(class~predictions,pred_and_true)
-ggplot(lift_vals,values=60) + theme_bw()
-
-```
-
-
-```{r Produce_charts}
-
-
 
 ```
